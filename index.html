@@ -1072,8 +1072,14 @@
         let deltaY = e.clientY - this.groupDragStartY;
         this.selectedItemsInitialPositions.forEach(pos => {
           if (pos.item.parentElement === this.canvas) {
-            pos.item.style.left = (pos.left + deltaX) + "px";
-            pos.item.style.top = (pos.top + deltaY) + "px";
+            let newLeft = pos.left + deltaX;
+            let newTop = pos.top + deltaY;
+            if (this.isSnapEnabled()) {
+              newLeft = Math.round(newLeft / gridSize) * gridSize;
+              newTop = Math.round(newTop / gridSize) * gridSize;
+            }
+            pos.item.style.left = newLeft + "px";
+            pos.item.style.top = newTop + "px";
           }
         });
         this.updateSelectionUI();
@@ -1112,7 +1118,7 @@
         document.addEventListener("mousemove", this.onGroupResizeMove);
         document.addEventListener("mouseup", this.onGroupResizeEnd);
       }
-      
+
       onGroupResizeMove = (e) => {
         let deltaX = e.clientX - this.groupResizeStartX;
         let deltaY = e.clientY - this.groupResizeStartY;
@@ -1120,6 +1126,7 @@
         let newTop = this.groupInitial.top;
         let newWidth = this.groupInitial.width;
         let newHeight = this.groupInitial.height;
+
         switch(this.groupResizeHandle) {
           case 'top-left':
             newLeft = this.groupInitial.left + deltaX;
@@ -1156,6 +1163,8 @@
             newWidth = this.groupInitial.width - deltaX;
             break;
         }
+
+        // Enforce minimum dimensions.
         const minWidth = 30, minHeight = 20;
         if(newWidth < minWidth) {
           newWidth = minWidth;
@@ -1167,22 +1176,43 @@
           if(['top-left', 'top', 'top-right'].includes(this.groupResizeHandle))
             newTop = this.groupInitial.top + (this.groupInitial.height - minHeight);
         }
+
+        // If snap is enabled, round the group bounding box values.
+        if (this.isSnapEnabled()) {
+          newLeft = Math.round(newLeft / gridSize) * gridSize;
+          newTop = Math.round(newTop / gridSize) * gridSize;
+          newWidth = Math.round(newWidth / gridSize) * gridSize;
+          newHeight = Math.round(newHeight / gridSize) * gridSize;
+        }
+
         let scaleX = newWidth / this.groupInitial.width;
         let scaleY = newHeight / this.groupInitial.height;
+
+        // Update each item's position and size, snapping them if required.
         this.groupResizeItemsInitial.forEach(data => {
           let newItemLeft = newLeft + (data.left - this.groupInitial.left) * scaleX;
           let newItemTop = newTop + (data.top - this.groupInitial.top) * scaleY;
           let newItemWidth = data.width * scaleX;
           let newItemHeight = data.height * scaleY;
+
+          if (this.isSnapEnabled()) {
+            newItemLeft = Math.round(newItemLeft / gridSize) * gridSize;
+            newItemTop = Math.round(newItemTop / gridSize) * gridSize;
+            newItemWidth = Math.round(newItemWidth / gridSize) * gridSize;
+            newItemHeight = Math.round(newItemHeight / gridSize) * gridSize;
+          }
+
           data.item.style.left = newItemLeft + "px";
           data.item.style.top = newItemTop + "px";
           data.item.style.width = newItemWidth + "px";
           data.item.style.height = newItemHeight + "px";
         });
+
+        // Update the group overlay (bounding box) and HTML.
         this.updateSelectionUI();
         this.updateHTML();
       }
-      
+
       onGroupResizeEnd = (e) => {
         document.removeEventListener("mousemove", this.onGroupResizeMove);
         document.removeEventListener("mouseup", this.onGroupResizeEnd);
