@@ -1,0 +1,1509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bidirectional Designer – Live HTML Editing (Fixed CheckBox/RadioButton)</title>
+  <style>
+    /* ─── Overall Layout ───────────────────────────────────────────── */
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+    }
+    /* Toolbox Panel */
+    #toolbox {
+      width: 200px;
+      border-right: 1px solid #ccc;
+      padding: 10px;
+      background-color: #f0f0f0;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+    #toolbox h3 { margin-top: 0; }
+    .toggle-container { margin-bottom: 10px; font-size: 0.9em; }
+    .draggable-item, .draggable-panel {
+      margin: 5px 0;
+      padding: 5px;
+      border: 1px solid #aaa;
+      background-color: #fff;
+      cursor: grab;
+      user-select: none;
+    }
+    .draggable-panel {
+      border-color: #0077aa;
+      background-color: #e0f7ff;
+    }
+    /* Vertical Splitter */
+    #vertical-splitter {
+      width: 5px;
+      background-color: #ccc;
+      cursor: ew-resize;
+    }
+    /* Main Panel */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    /* ─── Canvas (Design Surface) ───────────────────────────── */
+    #canvas {
+      height: calc(100% - 250px);
+      margin: 10px;
+      border: 1px solid #ccc;
+      position: relative;
+      background-color: #fff;
+      background-image: 
+        linear-gradient(to right, #ddd 1px, transparent 1px),
+        linear-gradient(to bottom, #ddd 1px, transparent 1px);
+      background-size: 10px 10px;
+    }
+    /* When live preview is enabled, hide canvas-item borders */
+    #canvas.live-preview .canvas-item {
+      border: none !important;
+    }
+    /* Horizontal Splitter */
+    #horizontal-splitter {
+      height: 5px;
+      background-color: #ccc;
+      cursor: ns-resize;
+      width: 100%;
+    }
+    /* ─── HTML Editor Panel (with line numbers) ───────────────────────────── */
+    #htmlEditorContainer {
+      display: flex;
+      width: 100%;
+      height: 150px;
+      border-top: 1px solid #ccc;
+      box-sizing: border-box;
+      font-family: monospace;
+    }
+    /* The gutter for line numbers */
+    #lineNumbers {
+      background: #eee;
+      color: #888;
+      padding: 5px 8px;
+      text-align: right;
+      user-select: none;
+      border-right: 1px solid #ccc;
+      line-height: 1.2em;
+      white-space: pre;
+    }
+    /* The HTML text editor */
+    #xamlOutput {
+      flex: 1;
+      padding: 5px;
+      border: none;
+      outline: none;
+      font-family: monospace;
+      line-height: 1.2em;
+      resize: none;
+    }
+    /* HTML Editor Controls (a button for fallback) */
+    #htmlEditorControls {
+      padding: 5px;
+      border-top: 1px solid #ccc;
+      background: #f9f9f9;
+      text-align: right;
+    }
+    /* ─── Designer Items on Canvas ───────────────────────────── */
+    .canvas-item {
+      box-sizing: border-box;
+      overflow: visible;
+      border: 1px dashed rgba(0,0,0,0.3);
+    }
+    .panel { }
+    .dockpanel { display: flex; flex-direction: row; }
+    .stackpanel { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: stretch; 
+      justify-content: flex-start;
+    }
+    .gridpanel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+    .wrappanel { display: flex; flex-wrap: wrap; gap: 5px; }
+    .stackpanel > .canvas-item { margin: 0; }
+    /* ─── Resize Handles for Individual Controls ───────────────────────────── */
+    .resize-handle {
+      width: 8px;
+      height: 8px;
+      background-color: #666;
+      position: absolute;
+    }
+    .handle-top-left    { top: -4px; left: -4px; cursor: nw-resize; }
+    .handle-top         { top: -4px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+    .handle-top-right   { top: -4px; right: -4px; cursor: ne-resize; }
+    .handle-right       { top: 50%; right: -4px; transform: translateY(-50%); cursor: e-resize; }
+    .handle-bottom-right{ bottom: -4px; right: -4px; cursor: se-resize; }
+    .handle-bottom      { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+    .handle-bottom-left { bottom: -4px; left: -4px; cursor: sw-resize; }
+    .handle-left        { top: 50%; left: -4px; transform: translateY(-50%); cursor: w-resize; }
+    /* ─── Rotation Handle for Individual Controls ───────────────────────────── */
+    .rotation-handle {
+      width: 12px;
+      height: 12px;
+      background-color: #f39c12;
+      border-radius: 50%;
+      position: absolute;
+      top: -28px;
+      left: 50%;
+      transform: translateX(-50%);
+      cursor: grab;
+    }
+    .canvas-item .resize-handle,
+    .canvas-item .rotation-handle { display: none; }
+    .canvas-item.selected .resize-handle,
+    .canvas-item.selected .rotation-handle { display: block; }
+    /* ─── Hide Individual Handles When Group Selection is Active ───────────────── */
+    #canvas.group-selected .canvas-item.selected .resize-handle,
+    #canvas.group-selected .canvas-item.selected .rotation-handle {
+      display: none !important;
+    }
+    /* ─── Group Selection Overlay (with 8 resize handles) ───────────────────────────── */
+    #group-selection-overlay {
+      position: absolute;
+      border: 1px dashed blue;
+      /* Allow the overlay to capture mouse events */
+      pointer-events: auto;
+      display: none;
+    }
+    /* Group handles styling (match individual control handles) */
+    #group-selection-overlay .group-resize-handle {
+      width: 8px;
+      height: 8px;
+      background-color: #666;
+      position: absolute;
+    }
+    #group-selection-overlay .group-handle-top-left    { top: -4px; left: -4px; cursor: nw-resize; }
+    #group-selection-overlay .group-handle-top         { top: -4px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+    #group-selection-overlay .group-handle-top-right   { top: -4px; right: -4px; cursor: ne-resize; }
+    #group-selection-overlay .group-handle-right       { top: 50%; right: -4px; transform: translateY(-50%); cursor: e-resize; }
+    #group-selection-overlay .group-handle-bottom-right{ bottom: -4px; right: -4px; cursor: se-resize; }
+    #group-selection-overlay .group-handle-bottom      { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+    #group-selection-overlay .group-handle-bottom-left { bottom: -4px; left: -4px; cursor: sw-resize; }
+    #group-selection-overlay .group-handle-left        { top: 50%; left: -4px; transform: translateY(-50%); cursor: w-resize; }
+    
+    #group-selection-overlay .group-rotation-handle {
+      width: 12px;
+      height: 12px;
+      background-color: #f39c12;
+      border-radius: 50%;
+      position: absolute;
+      top: -28px;
+      left: 50%;
+      transform: translateX(-50%);
+      cursor: grab;
+    }
+  </style>
+</head>
+<body>
+  <!-- Toolbox Panel -->
+  <div id="toolbox">
+    <h3>Toolbox</h3>
+    <div class="toggle-container">
+      <label>
+        <input type="checkbox" id="snapToggle" checked> Snap to Grid (10px)
+      </label>
+    </div>
+    <div class="toggle-container">
+      <label>
+        <input type="checkbox" id="previewToggle"> Live Preview
+      </label>
+    </div>
+    <!-- Free–form controls -->
+    <div class="draggable-item" draggable="true" data-type="Button">Button</div>
+    <div class="draggable-item" draggable="true" data-type="TextBlock">TextBlock</div>
+    <div class="draggable-item" draggable="true" data-type="TextBox">TextBox</div>
+    <div class="draggable-item" draggable="true" data-type="CheckBox">CheckBox</div>
+    <div class="draggable-item" draggable="true" data-type="ComboBox">ComboBox</div>
+    <div class="draggable-item" draggable="true" data-type="ListBox">ListBox</div>
+    <div class="draggable-item" draggable="true" data-type="Slider">Slider</div>
+    <div class="draggable-item" draggable="true" data-type="RadioButton">RadioButton</div>
+    <!-- Panel container types -->
+    <div class="draggable-panel" draggable="true" data-type="DockPanel">DockPanel</div>
+    <div class="draggable-panel" draggable="true" data-type="StackPanel">StackPanel</div>
+    <div class="draggable-panel" draggable="true" data-type="Grid">Grid</div>
+    <div class="draggable-panel" draggable="true" data-type="WrapPanel">WrapPanel</div>
+  </div>
+  <!-- Vertical Splitter -->
+  <div id="vertical-splitter"></div>
+  <!-- Main Panel -->
+  <div id="main">
+    <div id="canvas"></div>
+    <!-- Horizontal Splitter -->
+    <div id="horizontal-splitter"></div>
+    <!-- HTML Editor Container -->
+    <div id="htmlEditorContainer">
+      <div id="lineNumbers"></div>
+      <textarea id="xamlOutput"></textarea>
+    </div>
+    <!-- HTML Editor Controls -->
+    <div id="htmlEditorControls">
+      <button id="applyHtmlButton">Apply HTML Changes</button>
+    </div>
+  </div>
+  
+  <script>
+    /***************************************************
+     * Global Variables for Designer Actions & Grid
+     ***************************************************/
+    const gridSize = 10;
+    let currentDraggingItem = null;
+    let dragStartX = 0, dragStartY = 0;
+    let origDragLeft = 0, origDragTop = 0;
+    
+    let currentResizingItem = null;
+    let currentResizeHandle = null;
+    let resizeStartX = 0, resizeStartY = 0;
+    let origLeft = 0, origTop = 0, origWidth = 0, origHeight = 0;
+    
+    let currentRotatingItem = null;
+    let rotateCenter = { x: 0, y: 0 };
+    let rotateStartAngle = 0;
+    let origRotation = 0;
+    
+    // Debounce timer for live reloading from the HTML editor
+    let htmlDebounceTimer = null;
+    
+    /***************************************************
+     * HTMLFactory Class
+     * Generates output HTML from the canvas.
+     ***************************************************/
+    class HTMLFactory {
+      static generate(root) {
+        let html = '';  // Removed the "<!-- Generated HTML -->" comment
+        html += '<style>\n' +
+          '.dockpanel { display: flex; flex-direction: row; }\n' +
+          '.stackpanel { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; }\n' +
+          '.gridpanel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }\n' +
+          '.wrappanel { display: flex; flex-wrap: wrap; gap: 5px; }\n' +
+          '</style>\n';
+        for (let child of root.children) {
+          if (child.getAttribute("data-type")) {
+            html += HTMLFactory.processElement(child, true, null);
+          }
+        }
+        return html;
+      }
+      
+      static processElement(element, isRoot, parentType) {
+        if (element.classList.contains("resize-handle") ||
+            element.classList.contains("rotation-handle") ||
+            element.id === "group-selection-overlay") {
+          return "";
+        }
+        let type = element.getAttribute("data-type");
+        let out = "";
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(type)) {
+          let panelClass = type.toLowerCase() + "panel";
+          let style = "";
+          if (isRoot) {
+            if (element.style.left) style += `left: ${element.style.left}; `;
+            if (element.style.top) style += `top: ${element.style.top}; `;
+            if (element.style.width) style += `width: ${element.style.width}; `;
+            if (element.style.height) style += `height: ${element.style.height}; `;
+            style += "position: absolute;";
+          }
+          out += `<div class="${panelClass}" data-type="${type}" style="${style}">\n`;
+          for (let child of element.children) {
+            if (child.getAttribute("data-type")) {
+              let childStyle = "";
+              if (type === "StackPanel") childStyle = "display: block; width: 100%;";
+              out += HTMLFactory.processElement(child, false, type).replace("STYLE_PLACEHOLDER", childStyle);
+            }
+          }
+          out += `</div>\n`;
+        } else {
+          let style = "";
+          if (isRoot) {
+            if (element.style.left) style += `left: ${element.style.left}; `;
+            if (element.style.top) style += `top: ${element.style.top}; `;
+            if (element.style.width) style += `width: ${element.style.width}; `;
+            if (element.style.height) style += `height: ${element.style.height}; `;
+            style += "position: absolute;";
+          } else {
+            style = "STYLE_PLACEHOLDER";
+            if (parentType === "StackPanel") style = "display: block; width: 100%;";
+          }
+          if (type === "Button") {
+            out += `<button data-type="${type}" style="${style}">${element.innerText}</button>\n`;
+          } else if (type === "TextBlock") {
+            out += `<div data-type="${type}" style="${style}">${element.innerText}</div>\n`;
+          } else if (type === "TextBox") {
+            let val = element.firstElementChild ? element.firstElementChild.value : "";
+            out += `<input data-type="${type}" type="text" value="${val}" style="${style}"/>\n`;
+          } else if (type === "CheckBox") {
+            out += `<label data-type="${type}" style="${style}"><input type="checkbox"/></label>\n`;
+          } else if (type === "RadioButton") {
+            out += `<label data-type="${type}" style="${style}"><input type="radio"/></label>\n`;
+          } else if (type === "ComboBox") {
+            out += `<select data-type="${type}" style="${style}">
+  <option>Option 1</option>
+  <option>Option 2</option>
+  <option>Option 3</option>
+</select>\n`;
+          } else if (type === "ListBox") {
+            out += `<select data-type="${type}" multiple style="${style}">
+  <option>Item 1</option>
+  <option>Item 2</option>
+  <option>Item 3</option>
+</select>\n`;
+          } else if (type === "Slider") {
+            out += `<input data-type="${type}" type="range" value="50" style="${style}"/>\n`;
+          } else {
+            out += `<div data-type="${type}" style="${style}">${element.innerText}</div>\n`;
+          }
+        }
+        return out;
+      }
+    }
+    
+    /***************************************************
+     * App Class – Main Designer Logic
+     ***************************************************/
+    class App {
+      constructor() {
+        this.canvas = document.getElementById("canvas");
+        this.selectedItems = [];
+        this.createGroupSelectionOverlay();
+        this.toolBox = document.getElementById("toolbox");
+        this.previewToggle = document.getElementById("previewToggle");
+        this.snapToggle = document.getElementById("snapToggle");
+        this.xamlOutput = document.getElementById("xamlOutput");
+        this.livePreview = false;
+        this.clipboard = [];
+        // For selection rectangle support:
+        this.selectionRectEl = null;
+        this.selectionRectStart = null;
+        
+        this.setupDesigner();
+        this.setupSplitters();
+        this.setupPreviewToggle();
+        this.updateHTML();
+        
+        // Global keyboard listeners (ignore when editing HTML)
+        document.addEventListener("keydown", (e) => {
+          const activeTag = document.activeElement.tagName.toLowerCase();
+          if (activeTag === "textarea") return;
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+            this.copySelected();
+            e.preventDefault();
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+            this.cutSelected();
+            e.preventDefault();
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+            this.pasteClipboard();
+            e.preventDefault();
+          } else if (e.key === "Delete") {
+            this.deleteSelected();
+            e.preventDefault();
+          }
+        });
+        
+        // Start selection rectangle if clicking on canvas background.
+        this.canvas.addEventListener("mousedown", this.onCanvasMouseDown.bind(this));
+        
+        // Bidirectional editing: update line numbers and reload preview on every change.
+        this.xamlOutput.addEventListener("input", () => {
+          this.updateLineNumbers();
+          clearTimeout(htmlDebounceTimer);
+          htmlDebounceTimer = setTimeout(() => {
+            this.updateCanvasFromHTML();
+          }, 500);
+        });
+        document.getElementById("applyHtmlButton").addEventListener("click", () => {
+          this.updateCanvasFromHTML();
+        });
+        // Initialize line numbers.
+        this.updateLineNumbers();
+      }
+      
+      createGroupSelectionOverlay() {
+        this.groupOverlay = document.createElement("div");
+        this.groupOverlay.id = "group-selection-overlay";
+        // Create eight resize handles matching the individual control handles:
+        const handles = [
+          { cls: 'group-handle-top-left', type: 'top-left' },
+          { cls: 'group-handle-top', type: 'top' },
+          { cls: 'group-handle-top-right', type: 'top-right' },
+          { cls: 'group-handle-right', type: 'right' },
+          { cls: 'group-handle-bottom-right', type: 'bottom-right' },
+          { cls: 'group-handle-bottom', type: 'bottom' },
+          { cls: 'group-handle-bottom-left', type: 'bottom-left' },
+          { cls: 'group-handle-left', type: 'left' }
+        ];
+        handles.forEach(info => {
+          let handle = document.createElement("div");
+          handle.className = "group-resize-handle " + info.cls;
+          handle.dataset.handle = info.type;
+          this.groupOverlay.appendChild(handle);
+        });
+        // Create the rotation handle:
+        const groupRotationHandle = document.createElement("div");
+        groupRotationHandle.className = "group-rotation-handle";
+        this.groupOverlay.appendChild(groupRotationHandle);
+        this.canvas.appendChild(this.groupOverlay);
+        // Attach a mousedown listener to the overlay to delegate to the proper handler:
+        this.groupOverlay.addEventListener("mousedown", (e) => {
+          if (this.livePreview) return;
+          if (e.target.classList.contains("group-resize-handle"))
+            this.startGroupResize(e);
+          else if (e.target.classList.contains("group-rotation-handle"))
+            this.startGroupRotate(e);
+          else
+            this.startGroupDrag(e);
+        });
+      }
+      
+      setupDesigner() {
+        const toolboxItems = document.querySelectorAll('.draggable-item');
+        toolboxItems.forEach(item => {
+          item.addEventListener('dragstart', (e) => {
+            let type = e.target.getAttribute('data-type');
+            e.dataTransfer.setData('text/plain', type);
+          });
+        });
+        const toolboxPanels = document.querySelectorAll('.draggable-panel');
+        toolboxPanels.forEach(item => {
+          item.addEventListener('dragstart', (e) => {
+            let type = e.target.getAttribute('data-type');
+            e.dataTransfer.setData('text/plain', type);
+          });
+        });
+        this.canvas.addEventListener("dragover", (e) => { e.preventDefault(); });
+        this.canvas.addEventListener("drop", (e) => {
+          if (e.target === this.canvas) {
+            e.preventDefault();
+            let rect = this.canvas.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+            if (this.isSnapEnabled()) {
+              x = Math.round(x / gridSize) * gridSize;
+              y = Math.round(y / gridSize) * gridSize;
+            }
+            let type = e.dataTransfer.getData("text/plain");
+            if (type) {
+              this.addControlToCanvas(type, x, y);
+              this.updateHTML();
+            }
+          }
+        });
+        this.updateCanvasGrid();
+      }
+      
+      addPanelDropListener(panelContainer) {
+        panelContainer.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); });
+        panelContainer.addEventListener("drop", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          let type = e.dataTransfer.getData("text/plain");
+          if (type) {
+            this.addControlToContainer(panelContainer, type);
+            this.updateHTML();
+          }
+        });
+      }
+      
+      setupSplitters() {
+        const verticalSplitter = document.getElementById("vertical-splitter");
+        const toolbox = this.toolBox;
+        let isDraggingVSplitter = false;
+        let startX, startToolboxWidth;
+        const onVerticalSplitterMouseMove = (e) => {
+          if (!isDraggingVSplitter) return;
+          let deltaX = e.clientX - startX;
+          let newWidth = startToolboxWidth + deltaX;
+          newWidth = Math.max(newWidth, 100);
+          toolbox.style.width = newWidth + "px";
+        };
+        const onVerticalSplitterMouseUp = (e) => {
+          isDraggingVSplitter = false;
+          document.removeEventListener("mousemove", onVerticalSplitterMouseMove);
+          document.removeEventListener("mouseup", onVerticalSplitterMouseUp);
+        };
+        verticalSplitter.addEventListener("mousedown", (e) => {
+          isDraggingVSplitter = true;
+          startX = e.clientX;
+          startToolboxWidth = toolbox.offsetWidth;
+          document.addEventListener("mousemove", onVerticalSplitterMouseMove);
+          document.addEventListener("mouseup", onVerticalSplitterMouseUp);
+        });
+        
+        const horizontalSplitter = document.getElementById("horizontal-splitter");
+        const canvasPanel = this.canvas;
+        const editorPanel = document.getElementById("htmlEditorContainer");
+        let isDraggingHSplitter = false;
+        let startY, startCanvasHeight;
+        const onHorizontalSplitterMouseMove = (e) => {
+          if (!isDraggingHSplitter) return;
+          let deltaY = e.clientY - startY;
+          let newCanvasHeight = startCanvasHeight + deltaY;
+          newCanvasHeight = Math.max(newCanvasHeight, 50);
+          let mainHeight = document.getElementById("main").offsetHeight;
+          let splitterHeight = horizontalSplitter.offsetHeight;
+          let newEditorHeight = mainHeight - newCanvasHeight - splitterHeight;
+          newEditorHeight = Math.max(newEditorHeight, 50);
+          canvasPanel.style.height = newCanvasHeight + "px";
+          editorPanel.style.height = newEditorHeight + "px";
+        };
+        const onHorizontalSplitterMouseUp = (e) => {
+          isDraggingHSplitter = false;
+          document.removeEventListener("mousemove", onHorizontalSplitterMouseMove);
+          document.removeEventListener("mouseup", onHorizontalSplitterMouseUp);
+        };
+        horizontalSplitter.addEventListener("mousedown", (e) => {
+          isDraggingHSplitter = true;
+          startY = e.clientY;
+          startCanvasHeight = canvasPanel.offsetHeight;
+          document.addEventListener("mousemove", onHorizontalSplitterMouseMove);
+          document.addEventListener("mouseup", onHorizontalSplitterMouseUp);
+        });
+      }
+      
+      setupPreviewToggle() {
+        this.previewToggle.addEventListener("change", (e) => {
+          this.livePreview = this.previewToggle.checked;
+          this.updateLivePreview();
+        });
+      }
+      
+      updateCanvasGrid() {
+        if (this.livePreview) {
+          this.canvas.style.backgroundImage = "none";
+        } else {
+          this.canvas.style.backgroundImage =
+            "linear-gradient(to right, #ddd 1px, transparent 1px), linear-gradient(to bottom, #ddd 1px, transparent 1px)";
+          this.canvas.style.backgroundSize = gridSize + "px " + gridSize + "px";
+        }
+      }
+      
+      updateLivePreview() {
+        if (this.livePreview) {
+          this.canvas.classList.add("live-preview");
+        } else {
+          this.canvas.classList.remove("live-preview");
+        }
+        let items = this.canvas.querySelectorAll(".canvas-item");
+        items.forEach(item => {
+          let computedPos = window.getComputedStyle(item).position;
+          if (computedPos === "absolute") {
+            let handles = item.querySelectorAll(".resize-handle, .rotation-handle");
+            if (this.livePreview) {
+              handles.forEach(h => h.style.display = "none");
+              let inner = item.firstElementChild;
+              if (inner) inner.style.pointerEvents = "auto";
+              item.style.cursor = "default";
+            } else {
+              handles.forEach(h => h.style.display = "");
+              let inner = item.firstElementChild;
+              if (inner) inner.style.pointerEvents = "none";
+              item.style.cursor = "move";
+            }
+          } else {
+            let inner = item.firstElementChild;
+            if (inner) inner.style.pointerEvents = "none";
+            item.style.cursor = "default";
+            let handles = item.querySelectorAll(".resize-handle, .rotation-handle");
+            handles.forEach(h => h.style.display = "none");
+          }
+        });
+        this.updateCanvasGrid();
+      }
+      
+      isSnapEnabled() { return this.snapToggle.checked; }
+      
+      addControlToCanvas(type, x, y) {
+        let container = document.createElement("div");
+        container.classList.add("canvas-item");
+        container.setAttribute("data-type", type);
+        container.style.position = "absolute";
+        container.style.left = x + "px";
+        container.style.top = y + "px";
+        container.dataset.rotation = "0";
+        
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(type)) {
+          container.classList.add("panel");
+          switch(type) {
+            case "DockPanel": container.classList.add("dockpanel"); break;
+            case "StackPanel": container.classList.add("stackpanel"); break;
+            case "Grid": container.classList.add("gridpanel"); break;
+            case "WrapPanel": container.classList.add("wrappanel"); break;
+          }
+          container.style.width = "200px";
+          container.style.height = "200px";
+          this.addPanelDropListener(container);
+        } else {
+          let defaultWidth = 100, defaultHeight = 30;
+          if (type === "TextBlock") { defaultWidth = 120; defaultHeight = 20; }
+          else if (type === "TextBox") { defaultWidth = 120; defaultHeight = 25; }
+          else if (type === "ComboBox" || type === "ListBox") { defaultWidth = 120; defaultHeight = 30; }
+          else if (type === "Slider") { defaultWidth = 150; defaultHeight = 30; }
+          container.style.width = defaultWidth + "px";
+          container.style.height = defaultHeight + "px";
+          
+          let controlElement;
+          switch (type) {
+            case "Button":
+              controlElement = document.createElement("button");
+              controlElement.textContent = "Button";
+              break;
+            case "TextBlock":
+              controlElement = document.createElement("div");
+              controlElement.textContent = "TextBlock";
+              controlElement.style.display = "flex";
+              controlElement.style.alignItems = "center";
+              controlElement.style.justifyContent = "center";
+              break;
+            case "TextBox":
+              controlElement = document.createElement("input");
+              controlElement.type = "text";
+              controlElement.value = "TextBox";
+              controlElement.style.boxSizing = "border-box";
+              break;
+            case "CheckBox":
+              controlElement = document.createElement("label");
+              let checkbox = document.createElement("input");
+              checkbox.type = "checkbox";
+              controlElement.appendChild(checkbox);
+              controlElement.appendChild(document.createTextNode(" CheckBox"));
+              break;
+            case "RadioButton":
+              controlElement = document.createElement("label");
+              let radio = document.createElement("input");
+              radio.type = "radio";
+              controlElement.appendChild(radio);
+              controlElement.appendChild(document.createTextNode(" RadioButton"));
+              break;
+            case "ComboBox":
+              controlElement = document.createElement("select");
+              ["Option 1", "Option 2", "Option 3"].forEach(opt => {
+                let option = document.createElement("option");
+                option.text = opt;
+                controlElement.appendChild(option);
+              });
+              break;
+            case "ListBox":
+              controlElement = document.createElement("select");
+              controlElement.multiple = true;
+              ["Item 1", "Item 2", "Item 3"].forEach(item => {
+                let option = document.createElement("option");
+                option.text = item;
+                controlElement.appendChild(option);
+              });
+              break;
+            case "Slider":
+              controlElement = document.createElement("input");
+              controlElement.type = "range";
+              controlElement.value = 50;
+              break;
+            default:
+              controlElement = document.createElement("div");
+              controlElement.textContent = type;
+          }
+          controlElement.style.width = "100%";
+          controlElement.style.height = "100%";
+          container.appendChild(controlElement);
+        }
+        
+        this.addHandles(container);
+        
+        container.addEventListener("mousedown", (e) => {
+          if (this.livePreview) return;
+          if (e.target.classList.contains("resize-handle") ||
+              e.target.classList.contains("rotation-handle"))
+            return;
+          if (e.shiftKey) {
+            if (this.selectedItems.includes(container))
+              this.selectedItems = this.selectedItems.filter(item => item !== container);
+            else
+              this.selectedItems.push(container);
+          } else {
+            this.selectedItems = [container];
+          }
+          this.updateSelectionUI();
+          if (container.parentElement === this.canvas) {
+            currentDraggingItem = container;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            origDragLeft = parseFloat(container.style.left);
+            origDragTop = parseFloat(container.style.top);
+            document.addEventListener("mousemove", this.onMouseMoveDrag);
+            document.addEventListener("mouseup", this.onMouseUpDrag);
+          }
+        });
+        
+        this.canvas.appendChild(container);
+      }
+      
+      addControlToContainer(container, type) {
+        let child = document.createElement("div");
+        child.classList.add("canvas-item");
+        child.setAttribute("data-type", type);
+        child.dataset.rotation = "0";
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(container.getAttribute("data-type"))) {
+          child.style.position = "relative";
+          child.style.left = "";
+          child.style.top = "";
+          if (container.getAttribute("data-type") === "StackPanel") {
+            child.style.width = "100%";
+          } else {
+            child.style.width = "auto";
+          }
+          child.style.height = "30px";
+        } else {
+          child.style.position = "absolute";
+          child.style.left = "0px";
+          child.style.top = "0px";
+          child.style.width = "100px";
+          child.style.height = "30px";
+        }
+        
+        let controlElement;
+        switch (type) {
+          case "Button":
+            controlElement = document.createElement("button");
+            controlElement.textContent = "Button";
+            break;
+          case "TextBlock":
+            controlElement = document.createElement("div");
+            controlElement.textContent = "TextBlock";
+            controlElement.style.display = "flex";
+            controlElement.style.alignItems = "center";
+            controlElement.style.justifyContent = "center";
+            break;
+          case "TextBox":
+            controlElement = document.createElement("input");
+            controlElement.type = "text";
+            controlElement.value = "TextBox";
+            controlElement.style.boxSizing = "border-box";
+            break;
+          case "CheckBox":
+            controlElement = document.createElement("label");
+            let checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            controlElement.appendChild(checkbox);
+            controlElement.appendChild(document.createTextNode(" CheckBox"));
+            break;
+          case "RadioButton":
+            controlElement = document.createElement("label");
+            let radio = document.createElement("input");
+            radio.type = "radio";
+            controlElement.appendChild(radio);
+            controlElement.appendChild(document.createTextNode(" RadioButton"));
+            break;
+          case "ComboBox":
+            controlElement = document.createElement("select");
+            ["Option 1", "Option 2", "Option 3"].forEach(opt => {
+              let option = document.createElement("option");
+              option.text = opt;
+              controlElement.appendChild(option);
+            });
+            break;
+          case "ListBox":
+            controlElement = document.createElement("select");
+            controlElement.multiple = true;
+            ["Item 1", "Item 2", "Item 3"].forEach(item => {
+              let option = document.createElement("option");
+              option.text = item;
+              controlElement.appendChild(option);
+            });
+            break;
+          case "Slider":
+            controlElement = document.createElement("input");
+            controlElement.type = "range";
+            controlElement.value = 50;
+            break;
+          default:
+            controlElement = document.createElement("div");
+            controlElement.textContent = type;
+        }
+        controlElement.style.width = "100%";
+        controlElement.style.height = "100%";
+        child.appendChild(controlElement);
+        container.appendChild(child);
+        
+        child.addEventListener("mousedown", (e) => {
+          if (this.livePreview) return;
+          if (e.target.classList.contains("resize-handle") ||
+              e.target.classList.contains("rotation-handle"))
+            return;
+          if (e.shiftKey) {
+            if (this.selectedItems.includes(child))
+              this.selectedItems = this.selectedItems.filter(item => item !== child);
+            else
+              this.selectedItems.push(child);
+          } else {
+            this.selectedItems = [child];
+          }
+          this.updateSelectionUI();
+        });
+      }
+      
+      addHandles(container) {
+        if (container.style.position !== "absolute") return;
+        const handles = [
+          { cls: 'handle-top-left', type: 'top-left' },
+          { cls: 'handle-top', type: 'top' },
+          { cls: 'handle-top-right', type: 'top-right' },
+          { cls: 'handle-right', type: 'right' },
+          { cls: 'handle-bottom-right', type: 'bottom-right' },
+          { cls: 'handle-bottom', type: 'bottom' },
+          { cls: 'handle-bottom-left', type: 'bottom-left' },
+          { cls: 'handle-left', type: 'left' }
+        ];
+        handles.forEach(info => {
+          let handle = document.createElement("div");
+          handle.classList.add("resize-handle", info.cls);
+          handle.dataset.handle = info.type;
+          handle.addEventListener("mousedown", (e) => {
+            if (this.livePreview) return;
+            e.stopPropagation();
+            currentResizingItem = container;
+            currentResizeHandle = info.type;
+            resizeStartX = e.clientX;
+            resizeStartY = e.clientY;
+            origLeft = parseFloat(container.style.left) || container.offsetLeft || 0;
+            origTop = parseFloat(container.style.top) || container.offsetTop || 0;
+            origWidth = parseFloat(container.style.width) || container.offsetWidth;
+            origHeight = parseFloat(container.style.height) || container.offsetHeight;
+            document.addEventListener("mousemove", this.onMouseMoveResize);
+            document.addEventListener("mouseup", this.onMouseUpResize);
+          });
+          container.appendChild(handle);
+        });
+        let rotationHandle = document.createElement("div");
+        rotationHandle.classList.add("rotation-handle");
+        rotationHandle.addEventListener("mousedown", (e) => {
+          if (this.livePreview) return;
+          e.stopPropagation();
+          currentRotatingItem = container;
+          let rect = container.getBoundingClientRect();
+          rotateCenter.x = rect.left + rect.width/2;
+          rotateCenter.y = rect.top + rect.height/2;
+          rotateStartAngle = Math.atan2(e.clientY - rotateCenter.y, e.clientX - rotateCenter.x) * (180/Math.PI);
+          origRotation = parseFloat(container.dataset.rotation) || 0;
+          document.addEventListener("mousemove", this.onMouseMoveRotate);
+          document.addEventListener("mouseup", this.onMouseUpRotate);
+        });
+        container.appendChild(rotationHandle);
+      }
+      
+      onMouseMoveDrag = (e) => {
+        if (currentDraggingItem) {
+          let deltaX = e.clientX - dragStartX;
+          let deltaY = e.clientY - dragStartY;
+          let newLeft = origDragLeft + deltaX;
+          let newTop = origDragTop + deltaY;
+          if (this.isSnapEnabled()) {
+            newLeft = Math.round(newLeft / gridSize) * gridSize;
+            newTop = Math.round(newTop / gridSize) * gridSize;
+          }
+          currentDraggingItem.style.left = newLeft + "px";
+          currentDraggingItem.style.top = newTop + "px";
+          this.updateHTML();
+          this.updateSelectionUI();
+        }
+      }
+      
+      onMouseUpDrag = (e) => {
+        currentDraggingItem = null;
+        document.removeEventListener("mousemove", this.onMouseMoveDrag);
+        document.removeEventListener("mouseup", this.onMouseUpDrag);
+        this.updateHTML();
+      }
+      
+      onMouseMoveResize = (e) => {
+        if (!currentResizingItem) return;
+        let deltaX = e.clientX - resizeStartX;
+        let deltaY = e.clientY - resizeStartY;
+        let newLeft = origLeft, newTop = origTop, newWidth = origWidth, newHeight = origHeight;
+        const minWidth = 30, minHeight = 20;
+        let isInPanel = false;
+        if (currentResizingItem.parentElement && ["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(currentResizingItem.parentElement.getAttribute("data-type"))) {
+          isInPanel = true;
+        }
+        if (isInPanel) {
+          switch (currentResizeHandle) {
+            case 'top-left':
+              newWidth = origWidth - deltaX;
+              newHeight = origHeight - deltaY;
+              break;
+            case 'top':
+              newHeight = origHeight - deltaY;
+              break;
+            case 'top-right':
+              newWidth = origWidth + deltaX;
+              newHeight = origHeight - deltaY;
+              break;
+            case 'right':
+              newWidth = origWidth + deltaX;
+              break;
+            case 'bottom-right':
+              newWidth = origWidth + deltaX;
+              newHeight = origHeight + deltaY;
+              break;
+            case 'bottom':
+              newHeight = origHeight + deltaY;
+              break;
+            case 'bottom-left':
+              newWidth = origWidth - deltaX;
+              newHeight = origHeight + deltaY;
+              break;
+            case 'left':
+              newWidth = origWidth - deltaX;
+              break;
+          }
+          newLeft = origLeft;
+          newTop = origTop;
+        } else {
+          switch (currentResizeHandle) {
+            case 'top-left':
+              newWidth = origWidth - deltaX;
+              newHeight = origHeight - deltaY;
+              newLeft = origLeft + deltaX;
+              newTop = origTop + deltaY;
+              break;
+            case 'top':
+              newHeight = origHeight - deltaY;
+              newTop = origTop + deltaY;
+              break;
+            case 'top-right':
+              newWidth = origWidth + deltaX;
+              newHeight = origHeight - deltaY;
+              newTop = origTop + deltaY;
+              break;
+            case 'right':
+              newWidth = origWidth + deltaX;
+              break;
+            case 'bottom-right':
+              newWidth = origWidth + deltaX;
+              newHeight = origHeight + deltaY;
+              break;
+            case 'bottom':
+              newHeight = origHeight + deltaY;
+              break;
+            case 'bottom-left':
+              newWidth = origWidth - deltaX;
+              newHeight = origHeight + deltaY;
+              newLeft = origLeft + deltaX;
+              break;
+            case 'left':
+              newWidth = origWidth - deltaX;
+              newLeft = origLeft + deltaX;
+              break;
+          }
+        }
+        if (newWidth < minWidth) {
+          newWidth = minWidth;
+          if (!isInPanel && currentResizeHandle.includes('left')) {
+            newLeft = origLeft + (origWidth - minWidth);
+          }
+        }
+        if (newHeight < minHeight) {
+          newHeight = minHeight;
+          if (!isInPanel && currentResizeHandle.includes('top')) {
+            newTop = origTop + (origHeight - minHeight);
+          }
+        }
+        if (this.isSnapEnabled()) {
+          newLeft = Math.round(newLeft / gridSize) * gridSize;
+          newTop = Math.round(newTop / gridSize) * gridSize;
+          newWidth = Math.round(newWidth / gridSize) * gridSize;
+          newHeight = Math.round(newHeight / gridSize) * gridSize;
+        }
+        currentResizingItem.style.width = newWidth + "px";
+        currentResizingItem.style.height = newHeight + "px";
+        if (!isInPanel) {
+          currentResizingItem.style.left = newLeft + "px";
+          currentResizingItem.style.top = newTop + "px";
+        }
+        this.updateHTML();
+        this.updateSelectionUI();
+      }
+      
+      onMouseUpResize = (e) => {
+        currentResizingItem = null;
+        currentResizeHandle = null;
+        document.removeEventListener("mousemove", this.onMouseMoveResize);
+        document.removeEventListener("mouseup", this.onMouseUpResize);
+        this.updateHTML();
+      }
+      
+      onMouseMoveRotate = (e) => {
+        if (!currentRotatingItem) return;
+        let currentAngle = Math.atan2(e.clientY - rotateCenter.y, e.clientX - rotateCenter.x) * (180/Math.PI);
+        let deltaAngle = currentAngle - rotateStartAngle;
+        let newRotation = origRotation + deltaAngle;
+        currentRotatingItem.dataset.rotation = newRotation;
+        currentRotatingItem.style.transform = "rotate(" + newRotation + "deg)";
+        this.updateHTML();
+      }
+      
+      onMouseUpRotate = (e) => {
+        currentRotatingItem = null;
+        document.removeEventListener("mousemove", this.onMouseMoveRotate);
+        document.removeEventListener("mouseup", this.onMouseUpRotate);
+        this.updateHTML();
+      }
+      
+      /* ─── Group Transformation Handlers ───────────────── */
+      startGroupDrag(e) {
+        e.preventDefault();
+        this.groupDragStartX = e.clientX;
+        this.groupDragStartY = e.clientY;
+        this.selectedItemsInitialPositions = this.selectedItems.map(item => {
+          let rect = item.getBoundingClientRect();
+          let canvasRect = this.canvas.getBoundingClientRect();
+          return {
+            item: item,
+            left: rect.left - canvasRect.left,
+            top: rect.top - canvasRect.top
+          };
+        });
+        document.addEventListener("mousemove", this.onGroupDragMove);
+        document.addEventListener("mouseup", this.onGroupDragEnd);
+      }
+      
+      onGroupDragMove = (e) => {
+        let deltaX = e.clientX - this.groupDragStartX;
+        let deltaY = e.clientY - this.groupDragStartY;
+        this.selectedItemsInitialPositions.forEach(pos => {
+          if (pos.item.parentElement === this.canvas) {
+            pos.item.style.left = (pos.left + deltaX) + "px";
+            pos.item.style.top = (pos.top + deltaY) + "px";
+          }
+        });
+        this.updateSelectionUI();
+        this.updateHTML();
+      }
+      
+      onGroupDragEnd = (e) => {
+        document.removeEventListener("mousemove", this.onGroupDragMove);
+        document.removeEventListener("mouseup", this.onGroupDragEnd);
+        this.updateHTML();
+      }
+      
+      startGroupResize(e) {
+        e.stopPropagation();
+        this.groupResizeHandle = e.target.dataset.handle;
+        this.groupResizeStartX = e.clientX;
+        this.groupResizeStartY = e.clientY;
+        let overlayRect = this.groupOverlay.getBoundingClientRect();
+        let canvasRect = this.canvas.getBoundingClientRect();
+        this.groupInitial = {
+          left: overlayRect.left - canvasRect.left,
+          top: overlayRect.top - canvasRect.top,
+          width: overlayRect.width,
+          height: overlayRect.height
+        };
+        this.groupResizeItemsInitial = this.selectedItems.map(item => {
+          let rect = item.getBoundingClientRect();
+          return {
+            item: item,
+            left: rect.left - canvasRect.left,
+            top: rect.top - canvasRect.top,
+            width: rect.width,
+            height: rect.height
+          };
+        });
+        document.addEventListener("mousemove", this.onGroupResizeMove);
+        document.addEventListener("mouseup", this.onGroupResizeEnd);
+      }
+      
+      onGroupResizeMove = (e) => {
+        let deltaX = e.clientX - this.groupResizeStartX;
+        let deltaY = e.clientY - this.groupResizeStartY;
+        let newLeft = this.groupInitial.left;
+        let newTop = this.groupInitial.top;
+        let newWidth = this.groupInitial.width;
+        let newHeight = this.groupInitial.height;
+        switch(this.groupResizeHandle) {
+          case 'top-left':
+            newLeft = this.groupInitial.left + deltaX;
+            newTop = this.groupInitial.top + deltaY;
+            newWidth = this.groupInitial.width - deltaX;
+            newHeight = this.groupInitial.height - deltaY;
+            break;
+          case 'top':
+            newTop = this.groupInitial.top + deltaY;
+            newHeight = this.groupInitial.height - deltaY;
+            break;
+          case 'top-right':
+            newTop = this.groupInitial.top + deltaY;
+            newWidth = this.groupInitial.width + deltaX;
+            newHeight = this.groupInitial.height - deltaY;
+            break;
+          case 'right':
+            newWidth = this.groupInitial.width + deltaX;
+            break;
+          case 'bottom-right':
+            newWidth = this.groupInitial.width + deltaX;
+            newHeight = this.groupInitial.height + deltaY;
+            break;
+          case 'bottom':
+            newHeight = this.groupInitial.height + deltaY;
+            break;
+          case 'bottom-left':
+            newLeft = this.groupInitial.left + deltaX;
+            newWidth = this.groupInitial.width - deltaX;
+            newHeight = this.groupInitial.height + deltaY;
+            break;
+          case 'left':
+            newLeft = this.groupInitial.left + deltaX;
+            newWidth = this.groupInitial.width - deltaX;
+            break;
+        }
+        const minWidth = 30, minHeight = 20;
+        if(newWidth < minWidth) {
+          newWidth = minWidth;
+          if(['top-left', 'left', 'bottom-left'].includes(this.groupResizeHandle))
+            newLeft = this.groupInitial.left + (this.groupInitial.width - minWidth);
+        }
+        if(newHeight < minHeight) {
+          newHeight = minHeight;
+          if(['top-left', 'top', 'top-right'].includes(this.groupResizeHandle))
+            newTop = this.groupInitial.top + (this.groupInitial.height - minHeight);
+        }
+        let scaleX = newWidth / this.groupInitial.width;
+        let scaleY = newHeight / this.groupInitial.height;
+        this.groupResizeItemsInitial.forEach(data => {
+          let newItemLeft = newLeft + (data.left - this.groupInitial.left) * scaleX;
+          let newItemTop = newTop + (data.top - this.groupInitial.top) * scaleY;
+          let newItemWidth = data.width * scaleX;
+          let newItemHeight = data.height * scaleY;
+          data.item.style.left = newItemLeft + "px";
+          data.item.style.top = newItemTop + "px";
+          data.item.style.width = newItemWidth + "px";
+          data.item.style.height = newItemHeight + "px";
+        });
+        this.updateSelectionUI();
+        this.updateHTML();
+      }
+      
+      onGroupResizeEnd = (e) => {
+        document.removeEventListener("mousemove", this.onGroupResizeMove);
+        document.removeEventListener("mouseup", this.onGroupResizeEnd);
+        this.groupResizeHandle = null;
+        this.updateHTML();
+      }
+
+      startGroupRotate(e) {
+        e.stopPropagation();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        // Get current group overlay rectangle (in viewport) and convert to canvas coordinates
+        let overlayRect = this.groupOverlay.getBoundingClientRect();
+        this.groupCenter = {
+          x: overlayRect.left + overlayRect.width / 2 - canvasRect.left,
+          y: overlayRect.top + overlayRect.height / 2 - canvasRect.top
+        };
+        // Convert mouse coordinates into canvas coordinates
+        let mouseX = e.clientX - canvasRect.left;
+        let mouseY = e.clientY - canvasRect.top;
+        this.groupRotateStartAngle = Math.atan2(mouseY - this.groupCenter.y, mouseX - this.groupCenter.x);
+        // Save each selected item's initial center (in canvas coordinates)
+        this.groupRotateItemsInitial = this.selectedItems.map(item => {
+          let rect = item.getBoundingClientRect();
+          return {
+            item: item,
+            initialCenter: {
+              x: rect.left + rect.width / 2 - canvasRect.left,
+              y: rect.top + rect.height / 2 - canvasRect.top
+            },
+            width: rect.width,
+            height: rect.height,
+            initialRotation: parseFloat(item.dataset.rotation) || 0
+          };
+        });
+        document.addEventListener("mousemove", this.onGroupRotateMove);
+        document.addEventListener("mouseup", this.onGroupRotateEnd);
+      }
+
+      onGroupRotateMove = (e) => {
+        const canvasRect = this.canvas.getBoundingClientRect();
+        let mouseX = e.clientX - canvasRect.left;
+        let mouseY = e.clientY - canvasRect.top;
+        let currentAngle = Math.atan2(mouseY - this.groupCenter.y, mouseX - this.groupCenter.x);
+        let deltaAngle = currentAngle - this.groupRotateStartAngle;
+        this.groupRotateItemsInitial.forEach(data => {
+          let dx = data.initialCenter.x - this.groupCenter.x;
+          let dy = data.initialCenter.y - this.groupCenter.y;
+          let rotatedX = dx * Math.cos(deltaAngle) - dy * Math.sin(deltaAngle);
+          let rotatedY = dx * Math.sin(deltaAngle) + dy * Math.cos(deltaAngle);
+          let newCenterX = this.groupCenter.x + rotatedX;
+          let newCenterY = this.groupCenter.y + rotatedY;
+          // Calculate new left/top (in canvas coordinates)
+          let newLeft = newCenterX - data.width / 2;
+          let newTop = newCenterY - data.height / 2;
+          data.item.style.left = newLeft + "px";
+          data.item.style.top = newTop + "px";
+          let newRotation = data.initialRotation + (deltaAngle * (180 / Math.PI));
+          data.item.dataset.rotation = newRotation;
+          data.item.style.transform = "rotate(" + newRotation + "deg)";
+        });
+        // Update group overlay bounding box after rotating items
+        this.updateSelectionUI();
+        this.updateHTML();
+      }
+
+      onGroupRotateEnd = (e) => {
+        document.removeEventListener("mousemove", this.onGroupRotateMove);
+        document.removeEventListener("mouseup", this.onGroupRotateEnd);
+        this.updateHTML();
+      }
+      
+      updateSelectionUI() {
+        const canvasRect = this.canvas.getBoundingClientRect();
+        let minLeft = Infinity, minTop = Infinity, maxRight = -Infinity, maxBottom = -Infinity;
+        this.canvas.querySelectorAll(".canvas-item").forEach(item => {
+          if (this.selectedItems.includes(item)) {
+            item.classList.add("selected");
+            let rect = item.getBoundingClientRect();
+            let left = rect.left - canvasRect.left;
+            let top = rect.top - canvasRect.top;
+            let right = left + rect.width;
+            let bottom = top + rect.height;
+            minLeft = Math.min(minLeft, left);
+            minTop = Math.min(minTop, top);
+            maxRight = Math.max(maxRight, right);
+            maxBottom = Math.max(maxBottom, bottom);
+          } else {
+            item.classList.remove("selected");
+          }
+        });
+        if (this.selectedItems.length > 1) {
+          // Add a class to hide individual handles.
+          this.canvas.classList.add("group-selected");
+          this.groupOverlay.style.left = minLeft + "px";
+          this.groupOverlay.style.top = minTop + "px";
+          this.groupOverlay.style.width = (maxRight - minLeft) + "px";
+          this.groupOverlay.style.height = (maxBottom - minTop) + "px";
+          this.groupOverlay.style.display = "block";
+        } else {
+          this.canvas.classList.remove("group-selected");
+          this.groupOverlay.style.display = "none";
+        }
+      }
+      
+      updateHTML() {
+        let html = HTMLFactory.generate(this.canvas);
+        this.xamlOutput.value = html;
+        this.updateLineNumbers();
+      }
+      
+      /* ─── Delete Support ───────────────── */
+      deleteSelected() {
+        this.selectedItems.forEach(item => {
+          if (item.parentElement) {
+            item.parentElement.removeChild(item);
+          }
+        });
+        this.selectedItems = [];
+        this.updateHTML();
+      }
+      
+      /* ─── Cut/Copy/Paste Methods ───────────────── */
+      copySelected() {
+        this.clipboard = [];
+        this.selectedItems.forEach(item => {
+          this.clipboard.push(this.serializeItem(item));
+        });
+        console.log("Copied items:", this.clipboard);
+      }
+      
+      cutSelected() {
+        this.copySelected();
+        this.selectedItems.forEach(item => {
+          if (item.parentElement) {
+            item.parentElement.removeChild(item);
+          }
+        });
+        this.selectedItems = [];
+        this.updateHTML();
+      }
+      
+      pasteClipboard() {
+        if (!this.clipboard.length) return;
+        let offset = 10;
+        this.clipboard.forEach(data => {
+          this.deserializeItem(data, offset);
+        });
+        this.updateHTML();
+      }
+      
+      serializeItem(item) {
+        const data = {
+          type: item.getAttribute("data-type"),
+          left: item.style.left,
+          top: item.style.top,
+          width: item.style.width,
+          height: item.style.height,
+          rotation: item.dataset.rotation,
+          children: []
+        };
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(data.type)) {
+          Array.from(item.children).forEach(child => {
+            if (child.getAttribute("data-type")) {
+              data.children.push(this.serializeItem(child));
+            }
+          });
+        }
+        return data;
+      }
+      
+      deserializeItem(data, offset = 10) {
+        let x = parseFloat(data.left) + offset;
+        let y = parseFloat(data.top) + offset;
+        this.addControlToCanvas(data.type, x, y);
+        let newItem = this.canvas.lastChild;
+        newItem.style.width = data.width;
+        newItem.style.height = data.height;
+        newItem.dataset.rotation = data.rotation;
+        newItem.style.transform = "rotate(" + data.rotation + "deg)";
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(data.type)) {
+          data.children.forEach(childData => {
+            this.deserializePanelChild(childData, newItem, offset);
+          });
+        }
+      }
+      
+      deserializePanelChild(childData, container, offset = 10) {
+        this.addControlToContainer(container, childData.type);
+        let newChild = container.lastChild;
+        newChild.style.width = childData.width;
+        newChild.style.height = childData.height;
+        newChild.dataset.rotation = childData.rotation;
+        newChild.style.transform = "rotate(" + childData.rotation + "deg)";
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(childData.type)) {
+          childData.children.forEach(grandChildData => {
+            this.deserializePanelChild(grandChildData, newChild, offset);
+          });
+        }
+      }
+      
+      /* ─── Selection Rectangle Support ───────────────── */
+      onCanvasMouseDown(e) {
+        if (this.livePreview) return;
+        if (e.target !== this.canvas) return;
+        this.selectedItems = [];
+        this.updateSelectionUI();
+        this.selectionRectStart = { x: e.clientX, y: e.clientY };
+        this.selectionRectEl = document.createElement("div");
+        this.selectionRectEl.style.position = "absolute";
+        this.selectionRectEl.style.border = "1px dashed blue";
+        this.selectionRectEl.style.backgroundColor = "rgba(0, 0, 255, 0.1)";
+        this.selectionRectEl.style.pointerEvents = "none";
+        this.canvas.appendChild(this.selectionRectEl);
+        document.addEventListener("mousemove", this.onCanvasMouseMove);
+        document.addEventListener("mouseup", this.onCanvasMouseUp);
+      }
+      
+      onCanvasMouseMove = (e) => {
+        if (!this.selectionRectEl) return;
+        const canvasRect = this.canvas.getBoundingClientRect();
+        let startX = this.selectionRectStart.x - canvasRect.left;
+        let startY = this.selectionRectStart.y - canvasRect.top;
+        let currentX = e.clientX - canvasRect.left;
+        let currentY = e.clientY - canvasRect.top;
+        let x = Math.min(startX, currentX);
+        let y = Math.min(startY, currentY);
+        let width = Math.abs(startX - currentX);
+        let height = Math.abs(startY - currentY);
+        this.selectionRectEl.style.left = x + "px";
+        this.selectionRectEl.style.top = y + "px";
+        this.selectionRectEl.style.width = width + "px";
+        this.selectionRectEl.style.height = height + "px";
+      }
+      
+      onCanvasMouseUp = (e) => {
+        if (!this.selectionRectEl) return;
+        document.removeEventListener("mousemove", this.onCanvasMouseMove);
+        document.removeEventListener("mouseup", this.onCanvasMouseUp);
+        const selRect = this.selectionRectEl.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        this.canvas.removeChild(this.selectionRectEl);
+        this.selectionRectEl = null;
+        const items = this.canvas.querySelectorAll(".canvas-item");
+        let selected = [];
+        items.forEach(item => {
+          if (!item.getAttribute("data-type")) return;
+          const itemRect = item.getBoundingClientRect();
+          if (itemRect.right >= selRect.left &&
+              itemRect.left <= selRect.right &&
+              itemRect.bottom >= selRect.top &&
+              itemRect.top <= selRect.bottom) {
+            selected.push(item);
+          }
+        });
+        this.selectedItems = selected;
+        this.updateSelectionUI();
+      }
+      
+      /* ─── Bidirectional Editing: Update Canvas from Edited HTML ───────────────── */
+      updateCanvasFromHTML() {
+        let htmlStr = this.xamlOutput.value;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlStr, "text/html");
+        // Clear the canvas
+        this.canvas.innerHTML = "";
+        // Recreate designer items from parsed HTML (assumes elements with "data-type")
+        Array.from(doc.body.children).forEach(el => {
+          if (el.getAttribute("data-type")) {
+            this.renderElementToCanvas(el, this.canvas);
+          }
+        });
+        this.updateHTML();
+      }
+      
+      renderElementToCanvas(domEl, parent) {
+        let type = domEl.getAttribute("data-type");
+        if (!type) return;
+        let newEl;
+        if (parent === this.canvas) {
+          let left = parseFloat(domEl.style.left) || 0;
+          let top = parseFloat(domEl.style.top) || 0;
+          this.addControlToCanvas(type, left, top);
+          newEl = this.canvas.lastChild;
+        } else {
+          this.addControlToContainer(parent, type);
+          newEl = parent.lastChild;
+        }
+        if (domEl.style.width) newEl.style.width = domEl.style.width;
+        if (domEl.style.height) newEl.style.height = domEl.style.height;
+        if (domEl.style.transform) {
+          newEl.style.transform = domEl.style.transform;
+          let match = domEl.style.transform.match(/rotate\(([^)]+)\)/);
+          if (match) newEl.dataset.rotation = match[1];
+        }
+        if (domEl.innerText &&
+            !["DockPanel", "StackPanel", "Grid", "WrapPanel", "CheckBox", "RadioButton"].includes(type)) {
+          if (newEl.firstChild) newEl.firstChild.innerText = domEl.innerText;
+        }
+        if (["DockPanel", "StackPanel", "Grid", "WrapPanel"].includes(type)) {
+          Array.from(domEl.children).forEach(child => {
+            if (child.hasAttribute("data-type")) {
+              this.renderElementToCanvas(child, newEl);
+            }
+          });
+        }
+      }
+      
+      /* ─── HTML Editor Line Numbers Support ───────────────── */
+      updateLineNumbers() {
+        const textarea = document.getElementById("xamlOutput");
+        const lineNumbers = document.getElementById("lineNumbers");
+        const lines = textarea.value.split("\n").length;
+        let lineNums = "";
+        for (let i = 1; i <= lines; i++) {
+          lineNums += i + "\n";
+        }
+        lineNumbers.textContent = lineNums;
+      }
+    }
+    
+    window.addEventListener("DOMContentLoaded", () => { new App(); });
+  </script>
+</body>
+</html>
