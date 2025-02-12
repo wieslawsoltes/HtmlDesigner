@@ -1300,7 +1300,9 @@
             item.parentElement.removeChild(item);
           }
         });
+        // Clear the selection and update the selection UI to hide group handles.
         this.selectedItems = [];
+        this.updateSelectionUI();
         this.updateHTML();
       }
       
@@ -1320,7 +1322,9 @@
             item.parentElement.removeChild(item);
           }
         });
+        // Clear the selection and update the selection UI to hide group handles.
         this.selectedItems = [];
+        this.updateSelectionUI();
         this.updateHTML();
       }
       
