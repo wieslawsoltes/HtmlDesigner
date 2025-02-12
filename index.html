@@ -1330,10 +1330,19 @@
       
       pasteClipboard() {
         if (!this.clipboard.length) return;
+        // Clear any existing selection and hide group overlay
+        this.selectedItems = [];
+        // Paste items with an offset
         let offset = 10;
+        let pastedItems = [];
         this.clipboard.forEach(data => {
           this.deserializeItem(data, offset);
+          // Get the newly pasted element (assumes it's the last child on the canvas)
+          pastedItems.push(this.canvas.lastChild);
         });
+        // Select only the newly pasted items
+        this.selectedItems = pastedItems;
+        this.updateSelectionUI();
         this.updateHTML();
       }
       
